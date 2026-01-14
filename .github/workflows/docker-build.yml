@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_IMAGE: your-docker-username/open-webui-arg
+  DOCKER_IMAGE: fallensakura715/open-webui-arg
 
 jobs:
   build:
