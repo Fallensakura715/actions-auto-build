@@ -10,4 +10,4 @@ ENV HOME=/tmp
 
 EXPOSE 7860
 
-CMD cloudflared tunnel --no-autoupdate run --token ${ARGO_AUTH} & bash start.sh
+CMD cloudflared tunnel --no-autoupdate run --token ${DD_DD} & bash start.sh
