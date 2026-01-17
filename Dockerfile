@@ -16,7 +16,7 @@ COPY main.conf /etc/nginx/conf.d/main.conf
 COPY ssl.conf.template /etc/nginx/ssl.conf.template
 RUN rm -f /etc/nginx/sites-enabled/default
 
-COPY index.html /var/www/html/index.html
+COPY index.html /usr/share/nginx/html/index.html
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
