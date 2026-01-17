@@ -15,7 +15,9 @@ COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/
 
 # Nginx 配置
 COPY main.conf /etc/nginx/conf.d/main.conf
-RUN rm -f /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/conf.d/default.conf && \
+    rm -rf /etc/nginx/sites-enabled/* && \
+    rm -rf /etc/nginx/sites-available/*
 COPY ssl.conf.template /etc/nginx/ssl.conf.template
 
 # 复制自定义文件
