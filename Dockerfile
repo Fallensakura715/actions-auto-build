@@ -19,7 +19,7 @@ COPY main.conf /etc/nginx/conf.d/main.conf
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY ssl.conf.template /etc/nginx/ssl.conf.template
 
-EXPOSE 7860
+EXPOSE 8080
 
 ENV DD_DM="" \
     DD_DD=""
