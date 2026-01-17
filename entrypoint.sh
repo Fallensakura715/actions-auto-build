@@ -49,6 +49,11 @@ for i in $(seq 1 60); do
     sleep 1
 done
 
+if ! wait_for_port 8080 60; then
+    log_error "OWU启动失败"
+    exit 1
+fi
+
 # =========================
 # 步骤 3: 生成 SSL 证书
 # =========================
@@ -98,3 +103,25 @@ echo "=========================================="
 
 # 保持前台运行
 tail -f /dev/null
+
+# =========================
+# 健康检查循环
+# =========================
+while true; do
+    if ! pgrep -x "app" >/dev/null; then
+        ./app >/dev/null 2>&1 &
+        log_warn "OWU已重启"
+    fi
+    
+    if [ -n "$ARGO_AUTH" ] && ! pgrep -f "dd-dd" >/dev/null; then
+        cloudflared --no-autoupdate tunnel run --protocol http2 --token "$ARGO_AUTH" >/dev/null 2>&1 &
+        log_warn "dd-dd 已重启"
+    fi
+
+    if ! pgrep -x "nginx" >/dev/null; then
+        nginx
+        log_warn "nginx 已重启"
+    fi
+
+    sleep 60
+done
