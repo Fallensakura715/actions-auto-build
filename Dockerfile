@@ -25,8 +25,5 @@ EXPOSE 7860
 
 ENV DD_DM="" \
     DD_DD="" \
-    WEBUI_SECRET_KEY="" \
-    ENABLE_SIGNUP="true" \
-    ENABLE_LOGIN_FORM="true"
 
 CMD ["/entrypoint.sh"]
