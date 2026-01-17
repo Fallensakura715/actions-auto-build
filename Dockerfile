@@ -6,11 +6,19 @@ USER root
 
 # 安装依赖
 RUN apk add --no-cache \
+    bash \
     openssl \
     curl \
     procps \
     python3 \
-    py3-pip
+    py3-pip \
+    shadow \
+    su-exec \
+    git \
+    build-base \
+    python3-dev \
+    libffi-dev \
+    openssl-dev
 
 # 复制 cloudflared（伪装名称）
 COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/dd-dd
