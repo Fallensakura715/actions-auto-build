@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=cloudflare/cloudflared: latest /usr/local/bin/cloudflared /usr/local/bin/dd-dd
+COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/dd-dd
 
 # Nginx
 COPY main.conf /etc/nginx/conf.d/main.conf
