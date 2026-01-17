@@ -142,12 +142,6 @@ log_info "WebUI: http://localhost:8080"
 # 健康检查循环
 # =========================
 while true; do
-    # 检查 Open WebUI
-    if ! pgrep -f "start.sh" >/dev/null; then
-        log_warn "Open WebUI 进程丢失，正在重启..."
-        cd /app/backend
-        PORT=8080 HOST=0.0.0.0 ./start.sh > /tmp/webui.log 2>&1 &
-    fi
     
     # 检查隧道
     if [ -n "$ARGO_AUTH" ] && ! pgrep -f "dd-dd" >/dev/null; then
