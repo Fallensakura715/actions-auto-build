@@ -1,13 +1,32 @@
-FROM ghcr.io/open-webui/open-webui:main
+FROM ghcr. io/open-webui/open-webui:main
 
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/cloudflared
+RUN apt-get update && apt-get install -y \
+    nginx \
+    openssl \
+    curl \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV PORT=7860
-ENV HOME=/tmp
+COPY --from=cloudflare/cloudflared: latest /usr/local/bin/cloudflared /usr/local/bin/dd-dd
+
+# Nginx
+COPY main.conf /etc/nginx/conf.d/main.conf
+COPY ssl.conf.template /etc/nginx/ssl.conf.template
+RUN rm -f /etc/nginx/sites-enabled/default
+
+COPY index.html /var/www/html/index.html
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 7860
 
-CMD cloudflared tunnel --no-autoupdate run --token ${DD_DD} & bash start.sh
+ENV DD_DM="" \
+    DD_DD="" \
+    WEBUI_SECRET_KEY="" \
+    ENABLE_SIGNUP="true" \
+    ENABLE_LOGIN_FORM="true"
+
+CMD ["/entrypoint.sh"]
