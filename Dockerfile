@@ -24,6 +24,6 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 7860
 
 ENV DD_DM="" \
-    DD_DD="" \
+    DD_DD=""
 
 CMD ["/entrypoint.sh"]
