@@ -30,6 +30,22 @@ wait_for_port() {
     return 1
 }
 
+start_webui() {
+    log_info "正在启动 Open WebUI..."
+    cd /app/backend
+    
+    # 核心修改：使用 tee 将日志同时输出到文件和控制台，确保 HF 能看到日志
+    # 使用 stdbuf -oL 减少缓冲，让日志实时显示
+    stdbuf -oL nohup ./start.sh > /tmp/webui.log 2>&1 &
+    
+}
+
+# 实时读取日志文件的后台进程（确保日志能显示在 HF 控制台）
+tail_logs() {
+    touch /tmp/webui.log
+    tail -f /tmp/webui.log &
+}
+
 echo "===== Application Startup at $(date '+%Y-%m-%d %H:%M:%S') ====="
 
 # =========================
@@ -72,16 +88,18 @@ if [ ! -f "./start.sh" ]; then
 fi
 
 # 启动 Open WebUI
-PORT=8080 HOST=0.0.0.0 ./start.sh > /tmp/webui.log 2>&1 &
 
-log_info "等待 Open WebUI 启动..."
+tail_logs
+
+# 启动 WebUI
+PORT=8080 HOST=0.0.0.0 start_webui
 
 if wait_for_port 8080 60; then
-    log_ok "Open WebUI 已启动"
+    log_ok "OWU 已启动"
 else
-    log_error "Open WebUI 启动失败"
-    cat /tmp/webui.log
-    exit 1
+    log_error "Open WebUI 启动超时或失败，最后 20 行日志："
+    tail -n 20 /tmp/webui.log
+    # 这里不退出 exit 1，而是进入循环尝试挽救
 fi
 
 # =========================
@@ -153,6 +171,18 @@ while true; do
     if ! pgrep -x "nginx" >/dev/null; then
         log_warn "Nginx 进程丢失，正在重启..."
         nginx
+    fi
+
+    if ! curl -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
+        sleep 5
+        if ! curl -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
+             log_warn "OWU (端口 8080) 无响应，尝试重启..."
+             pkill -f "uvicorn" || true
+             pkill -f "start.sh" || true
+             
+             # 重启
+             PORT=8080 HOST=0.0.0.0 start_webui
+        fi
     fi
     
     sleep 60
