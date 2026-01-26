@@ -14,6 +14,7 @@ log_info() { echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') $1"; }
 log_ok() { echo "[OK] $(date '+%Y-%m-%d %H:%M:%S') $1"; }
 log_error() { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') $1"; }
 log_warn() { echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') $1"; }
+log_status() { echo "[STATUS] $(date '+%Y-%m-%d %H:%M:%S') $1"; }
 
 # =========================
 # 辅助函数
@@ -57,6 +58,39 @@ tail_logs() {
     tail -f /tmp/webui.log &
     TAIL_PID=$!
     log_info "日志监控进程 PID: $TAIL_PID"
+}
+
+get_webui_status() {
+    local status="UNKNOWN"
+    local details=""
+    
+    # 检查进程
+    if pgrep -f "uvicorn" >/dev/null 2>&1; then
+        local pid=$(pgrep -f "uvicorn" | head -1)
+        local mem=$(ps -o rss= -p $pid 2>/dev/null | awk '{printf "%.1f", $1/1024}')
+        details="PID=$pid, MEM=${mem}MB"
+        
+        # 检查 HTTP 响应
+        local http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://127.0.0.1:8080/health 2>/dev/null || echo "000")
+        
+        if [ "$http_code" = "200" ]; then
+            status="HEALTHY"
+            # 尝试获取版本
+            local version=$(curl -s --connect-timeout 3 http://127.0.0.1:8080/api/version 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "N/A")
+            details="$details, HTTP=$http_code, Ver=$version"
+        elif [ "$http_code" = "000" ]; then
+            status="NOT_RESPONDING"
+            details="$details, HTTP=timeout"
+        else
+            status="HTTP_ERROR"
+            details="$details, HTTP=$http_code"
+        fi
+    else
+        status="NOT_RUNNING"
+        details="uvicorn process not found"
+    fi
+    
+    echo "$status|$details"
 }
 
 echo "===== Application Startup at $(date '+%Y-%m-%d %H:%M:%S') ====="
@@ -114,9 +148,8 @@ sleep 10
 # 健康检查
 if wait_for_port 8080 60; then
     log_ok "Open WebUI 已成功启动并监听 8080 端口"
-    
     # 额外的 HTTP 健康检查
-    for i in {1..10}; do
+    for i in $(seq 1 10); do
         if curl -sf http://localhost:8080/api/version > /dev/null 2>&1; then
             log_ok "Open WebUI API 健康检查通过！"
             break
@@ -128,7 +161,6 @@ else
     log_error "Open WebUI 启动超时，最后 30 行日志："
     tail -n 30 /tmp/webui.log
     log_info "尽管启动检测失败，监控进程仍在运行并会自动重试"
-    # 不退出，让监控循环继续尝试
 fi
 
 log_ok "Open WebUI 监控已启动，进程会在崩溃后自动重启"
@@ -189,31 +221,72 @@ log_info "WebUI: http://localhost:8080"
 # =========================
 # 健康检查循环
 # =========================
+CHECK_COUNT=0
 while true; do
+    CHECK_COUNT=$((CHECK_COUNT + 1))
     
-    # 检查隧道
-    if [ -n "$ARGO_AUTH" ] && ! pgrep -f "dd-dd" >/dev/null; then
-        log_warn "隧道进程丢失，正在重启..."
-        /usr/local/bin/dd-dd tunnel --no-autoupdate run --protocol http2 --token "$ARGO_AUTH" > /tmp/tunnel.log 2>&1 &
-    fi
+    echo ""
+    echo "========== 健康检查 #$CHECK_COUNT [$(date '+%Y-%m-%d %H:%M:%S')] =========="
     
-    # 检查 Nginx
-    if ! pgrep -x "nginx" >/dev/null; then
-        log_warn "Nginx 进程丢失，正在重启..."
-        nginx
-    fi
-
-    if ! curl -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
-        sleep 5
-        if ! curl -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
-             log_warn "OWU (端口 8080) 无响应，尝试重启..."
-             pkill -f "uvicorn" || true
-             pkill -f "start.sh" || true
-             
-             # 重启
-             PORT=8080 HOST=0.0.0.0 start_webui
+    # -------- OpenWebUI 状态检查 --------
+    WEBUI_RESULT=$(get_webui_status)
+    WEBUI_STATUS=$(echo "$WEBUI_RESULT" | cut -d'|' -f1)
+    WEBUI_DETAILS=$(echo "$WEBUI_RESULT" | cut -d'|' -f2)
+    
+    case "$WEBUI_STATUS" in
+        "HEALTHY")
+            log_status "OpenWebUI: ✓ $WEBUI_STATUS ($WEBUI_DETAILS)"
+            ;;
+        "NOT_RESPONDING"|"HTTP_ERROR")
+            log_warn "OpenWebUI: ✗ $WEBUI_STATUS ($WEBUI_DETAILS)"
+            log_warn "等待 5 秒后重新检查..."
+            sleep 5
+            # 二次确认
+            WEBUI_RESULT2=$(get_webui_status)
+            WEBUI_STATUS2=$(echo "$WEBUI_RESULT2" | cut -d'|' -f1)
+            if [ "$WEBUI_STATUS2" != "HEALTHY" ]; then
+                log_warn "确认异常，正在重启 OpenWebUI..."
+                pkill -f "uvicorn" || true
+                pkill -f "start.sh" || true
+                sleep 2
+                PORT=8080 HOST=0.0.0.0 start_webui
+                log_info "重启命令已发送"
+            else
+                log_ok "OpenWebUI 已恢复正常"
+            fi
+            ;;
+        "NOT_RUNNING")
+            log_error "OpenWebUI: ✗ $WEBUI_STATUS ($WEBUI_DETAILS)"
+            log_warn "进程不存在，正在重启..."
+            PORT=8080 HOST=0.0.0.0 start_webui
+            ;;
+        *)
+            log_warn "OpenWebUI: ? $WEBUI_STATUS ($WEBUI_DETAILS)"
+            ;;
+    esac
+    
+    # -------- 隧道状态检查 --------
+    if [ -n "$ARGO_AUTH" ]; then
+        if pgrep -f "dd-dd" >/dev/null; then
+            TUNNEL_PID=$(pgrep -f "dd-dd" | head -1)
+            log_status "Tunnel: ✓ RUNNING (PID=$TUNNEL_PID)"
+        else
+            log_warn "Tunnel: ✗ NOT_RUNNING - 正在重启..."
+            /usr/local/bin/dd-dd tunnel --no-autoupdate run --protocol http2 --token "$ARGO_AUTH" > /tmp/tunnel.log 2>&1 &
         fi
     fi
     
-    sleep 60
+    # -------- Nginx 状态检查 --------
+    if pgrep -x "nginx" >/dev/null; then
+        NGINX_PID=$(pgrep -x "nginx" | head -1)
+        log_status "Nginx: ✓ RUNNING (PID=$NGINX_PID)"
+    else
+        log_warn "Nginx: ✗ NOT_RUNNING - 正在重启..."
+        nginx
+    fi
+    
+    echo "=================================================="
+    
+    # 30 秒检查一次
+    sleep 30
 done
