@@ -64,23 +64,30 @@ get_webui_status() {
     local status="UNKNOWN"
     local details=""
     
-    # 检查进程
+    # 1. 检查进程
     if pgrep -f "uvicorn" >/dev/null 2>&1; then
         local pid=$(pgrep -f "uvicorn" | head -1)
+        # 获取内存占用
         local mem=$(ps -o rss= -p $pid 2>/dev/null | awk '{printf "%.1f", $1/1024}')
         details="PID=$pid, MEM=${mem}MB"
+
+        # 2. 检查 HTTP 响应 (增加 --max-time)
+        # --connect-timeout 5: 5秒连不上就放弃
+        # --max-time 15: 15秒内不传完数据就强制断开
+        local http_result=$(curl -s --connect-timeout 5 --max-time 15 -w "%{http_code}" http://127.0.0.1:8080/api/version 2>/dev/null || echo "000")
         
-        # 检查 HTTP 响应
-        local http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://127.0.0.1:8080/health 2>/dev/null || echo "000")
-        
+        # 提取状态码 (最后三位)
+        local http_code="${http_result: -3}"
+        # 提取版本信息 (除了最后三位以外的内容)
+        local body="${http_result%???}"
+
         if [ "$http_code" = "200" ]; then
             status="HEALTHY"
-            # 尝试获取版本
-            local version=$(curl -s --connect-timeout 3 http://127.0.0.1:8080/api/version 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "N/A")
+            local version=$(echo "$body" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "N/A")
             details="$details, HTTP=$http_code, Ver=$version"
         elif [ "$http_code" = "000" ]; then
             status="NOT_RESPONDING"
-            details="$details, HTTP=timeout"
+            details="$details, HTTP=TIMEOUT"
         else
             status="HTTP_ERROR"
             details="$details, HTTP=$http_code"
@@ -89,7 +96,6 @@ get_webui_status() {
         status="NOT_RUNNING"
         details="uvicorn process not found"
     fi
-    
     echo "$status|$details"
 }
 
