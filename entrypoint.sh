@@ -69,7 +69,7 @@ get_webui_status() {
         local mem=$(ps -o rss= -p $pid 2>/dev/null | awk '{printf "%.1f", $1/1024}')
         details="PID=$pid, MEM=${mem}MB"
         
-        local http_result=$(curl -s --connect-timeout 5 --max-time 15 \
+        local http_result=$(curl -s --connect-timeout 5 --max-time 60 \
                            -w "%{http_code}" http://127.0.0.1:8080/api/version 2>/dev/null || echo "000")
         
         local http_code=$(echo "$http_result" | tail -c 4 | head -c 3)
