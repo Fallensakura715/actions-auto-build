@@ -1,15 +1,30 @@
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
-
     server_name ARGO_DOMAIN_PLACEHOLDER;
     ssl_certificate          /app/cert.pem;
     ssl_certificate_key      /app/cert.key;
     ssl_session_timeout 1d;
     ssl_session_cache shared:SSL:10m;
     ssl_protocols TLSv1.2 TLSv1.3;
-
     underscores_in_headers on;
+
+    # ============ gzip 压缩 ============
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 4;
+    gzip_min_length 256;
+    gzip_types
+        text/plain
+        text/css
+        text/javascript
+        application/javascript
+        application/json
+        application/xml
+        application/xhtml+xml
+        image/svg+xml
+        application/wasm;
 
     # WebSocket 支持
     location /ws {
