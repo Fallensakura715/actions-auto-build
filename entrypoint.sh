@@ -20,8 +20,8 @@ log_status() { echo "[STATUS] $(date '+%Y-%m-%d %H:%M:%S') $1"; }
 # 辅助函数
 # =========================
 wait_for_port() {
-    local port=$1
-    local timeout=$2
+    port=$1
+    timeout=$2
     for i in $(seq 1 $timeout); do
         if curl -s http://127.0.0.1:$port > /dev/null 2>&1; then
             return 0
@@ -38,20 +38,20 @@ LAST_RESTART_TIME=0
 RESTART_COOLDOWN=120  # 重启后等待120秒再检查
 
 get_webui_status() {
-    local status="UNKNOWN"
-    local details=""
+    status="UNKNOWN"
+    details=""
     if pgrep -f "uvicorn" >/dev/null 2>&1; then
-        local pid=$(pgrep -f "uvicorn" | head -1)
-        local mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{printf "%.1f", $1/1024}')
+        pid=$(pgrep -f "uvicorn" | head -1)
+        mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{printf "%.1f", $1/1024}')
         details="PID=$pid, MEM=${mem}MB"
-        local http_result
         http_result=$(curl -s --connect-timeout 5 --max-time 10 \
                       -w "%{http_code}" http://127.0.0.1:8080/api/version 2>/dev/null || echo "000")
-        local http_code="${http_result: -3}"
-        local body="${http_result:0:${#http_result}-3}"
+        # POSIX兼容的方式提取最后3个字符
+        http_code=$(echo "$http_result" | tail -c 4 | head -c 3)
+        # POSIX兼容的方式提取body（去掉最后3个字符）
+        body=$(echo "$http_result" | sed 's/...$//')
         if [ "$http_code" = "200" ]; then
             status="HEALTHY"
-            local version
             version=$(echo "$body" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "N/A")
             details="$details, HTTP=$http_code, Ver=$version"
         elif [ "$http_code" = "000" ]; then
@@ -78,13 +78,12 @@ launch_webui() {
 
 # 重启 WebUI 的函数（带保护机制）
 start_webui() {
-    local now
     now=$(date +%s)
 
     # ---- 防护1: 冷却期内不重启 ----
-    local elapsed=$((now - LAST_RESTART_TIME))
+    elapsed=$((now - LAST_RESTART_TIME))
     if [ "$LAST_RESTART_TIME" -gt 0 ] && [ "$elapsed" -lt "$RESTART_COOLDOWN" ]; then
-        local remaining=$((RESTART_COOLDOWN - elapsed))
+        remaining=$((RESTART_COOLDOWN - elapsed))
         log_warn "冷却期中，${remaining}秒后才允许重启，跳过"
         return 1
     fi
