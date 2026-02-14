@@ -68,6 +68,15 @@ get_webui_status() {
     echo "$status|$details"
 }
 
+# 真正启动 WebUI 的函数
+launch_webui() {
+    cd /app/backend
+    PORT=8080 HOST=0.0.0.0 ./start.sh > /tmp/webui.log 2>&1 &
+    WEBUI_PID=$!
+    log_info "OpenWebUI 已启动 (PID: $WEBUI_PID)"
+}
+
+# 重启 WebUI 的函数（带保护机制）
 start_webui() {
     local now
     now=$(date +%s)
@@ -94,7 +103,7 @@ start_webui() {
 
     pkill -f "uvicorn" 2>/dev/null || true
     sleep 3
-    PORT=8080 HOST=0.0.0.0 start_webui
+    launch_webui
     log_info "重启命令已发送，等待 ${RESTART_COOLDOWN} 秒冷却期"
 }
 
@@ -147,12 +156,11 @@ if [ ! -f "./start.sh" ]; then
     exit 1
 fi
 
-# 启动 Open WebUI
-
+# 启动日志监控
 tail_logs
 
-# 启动 WebUI
-PORT=8080 HOST=0.0.0.0 start_webui
+# 首次启动 WebUI
+launch_webui
 
 # 等待服务启动
 log_info "等待 Open WebUI 启动..."
@@ -177,6 +185,7 @@ else
 fi
 
 log_ok "Open WebUI 监控已启动，进程会在崩溃后自动重启"
+
 # =========================
 # 步骤 3: 生成 SSL 证书
 # =========================
