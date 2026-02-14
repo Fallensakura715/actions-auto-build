@@ -31,53 +31,28 @@ wait_for_port() {
     return 1
 }
 
-start_webui() {
-    log_info "正在启动 Open WebUI..."
-    cd /app/backend
-    
-    # 使用 while 循环实现自动重启
-    while true; do
-        log_info "[$(date '+%Y-%m-%d %H:%M:%S')] Starting Open WebUI..."
-        
-        # 使用 stdbuf 减少缓冲，实时输出日志
-        stdbuf -oL ./start.sh 2>&1 | tee -a /tmp/webui.log
-        
-        EXIT_CODE=$?
-        log_error "[$(date '+%Y-%m-%d %H:%M:%S')] Open WebUI exited with code $EXIT_CODE"
-        log_info "自动重启中，等待 5 秒..."
-        sleep 5
-    done &
-    
-    WEBUI_PID=$!
-    log_info "Open WebUI 监控进程 PID: $WEBUI_PID"
-}
-
-# 实时读取日志文件的后台进程（确保日志能显示在 HF 控制台）
-tail_logs() {
-    touch /tmp/webui.log
-    tail -f /tmp/webui.log &
-    TAIL_PID=$!
-    log_info "日志监控进程 PID: $TAIL_PID"
-}
+CHECK_COUNT=0
+WEBUI_RESTART_COUNT=0
+MAX_RESTART=5
+LAST_RESTART_TIME=0
+RESTART_COOLDOWN=120  # 重启后等待120秒再检查
 
 get_webui_status() {
     local status="UNKNOWN"
     local details=""
-    
     if pgrep -f "uvicorn" >/dev/null 2>&1; then
         local pid=$(pgrep -f "uvicorn" | head -1)
-        local mem=$(ps -o rss= -p $pid 2>/dev/null | awk '{printf "%.1f", $1/1024}')
+        local mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{printf "%.1f", $1/1024}')
         details="PID=$pid, MEM=${mem}MB"
-        
-        local http_result=$(curl -s --connect-timeout 5 --max-time 60 \
-                           -w "%{http_code}" http://127.0.0.1:8080/api/version 2>/dev/null || echo "000")
-        
-        local http_code=$(echo "$http_result" | tail -c 4 | head -c 3)
-        local body=$(echo "$http_result" | head -c -4)
-        
+        local http_result
+        http_result=$(curl -s --connect-timeout 5 --max-time 10 \
+                      -w "%{http_code}" http://127.0.0.1:8080/api/version 2>/dev/null || echo "000")
+        local http_code="${http_result: -3}"
+        local body="${http_result:0:${#http_result}-3}"
         if [ "$http_code" = "200" ]; then
             status="HEALTHY"
-            local version=$(echo "$body" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "N/A")
+            local version
+            version=$(echo "$body" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "N/A")
             details="$details, HTTP=$http_code, Ver=$version"
         elif [ "$http_code" = "000" ]; then
             status="NOT_RESPONDING"
@@ -90,8 +65,45 @@ get_webui_status() {
         status="NOT_RUNNING"
         details="uvicorn process not found"
     fi
-    
     echo "$status|$details"
+}
+
+restart_webui() {
+    local now
+    now=$(date +%s)
+
+    # ---- 防护1: 冷却期内不重启 ----
+    local elapsed=$((now - LAST_RESTART_TIME))
+    if [ "$LAST_RESTART_TIME" -gt 0 ] && [ "$elapsed" -lt "$RESTART_COOLDOWN" ]; then
+        local remaining=$((RESTART_COOLDOWN - elapsed))
+        log_warn "冷却期中，${remaining}秒后才允许重启，跳过"
+        return 1
+    fi
+
+    # ---- 防护2: 超过最大重启次数则放弃 ----
+    if [ "$WEBUI_RESTART_COUNT" -ge "$MAX_RESTART" ]; then
+        log_error "已连续重启 ${WEBUI_RESTART_COUNT} 次仍失败，停止自动重启"
+        log_error "请手动排查日志: /tmp/webui.log"
+        return 1
+    fi
+
+    # ---- 执行重启 ----
+    WEBUI_RESTART_COUNT=$((WEBUI_RESTART_COUNT + 1))
+    LAST_RESTART_TIME=$now
+    log_warn "正在重启 OpenWebUI（第 ${WEBUI_RESTART_COUNT}/${MAX_RESTART} 次）..."
+
+    pkill -f "uvicorn" 2>/dev/null || true
+    sleep 3
+    PORT=8080 HOST=0.0.0.0 start_webui
+    log_info "重启命令已发送，等待 ${RESTART_COOLDOWN} 秒冷却期"
+}
+
+# 实时读取日志文件的后台进程（确保日志能显示在 HF 控制台）
+tail_logs() {
+    touch /tmp/webui.log
+    tail -f /tmp/webui.log &
+    TAIL_PID=$!
+    log_info "日志监控进程 PID: $TAIL_PID"
 }
 
 echo "===== Application Startup at $(date '+%Y-%m-%d %H:%M:%S') ====="
@@ -222,50 +234,55 @@ log_info "WebUI: http://localhost:8080"
 # =========================
 # 健康检查循环
 # =========================
-CHECK_COUNT=0
 while true; do
     CHECK_COUNT=$((CHECK_COUNT + 1))
-    
     echo ""
     echo "========== 健康检查 #$CHECK_COUNT [$(date '+%Y-%m-%d %H:%M:%S')] =========="
-    
-    # -------- OpenWebUI 状态检查 --------
-    WEBUI_RESULT=$(get_webui_status)
-    WEBUI_STATUS=$(echo "$WEBUI_RESULT" | cut -d'|' -f1)
-    WEBUI_DETAILS=$(echo "$WEBUI_RESULT" | cut -d'|' -f2)
-    
-    case "$WEBUI_STATUS" in
-        "HEALTHY")
-            log_status "OpenWebUI: ✓ $WEBUI_STATUS ($WEBUI_DETAILS)"
-            ;;
-        "NOT_RESPONDING"|"HTTP_ERROR")
-            log_warn "OpenWebUI: ✗ $WEBUI_STATUS ($WEBUI_DETAILS)"
-            log_warn "等待 5 秒后重新检查..."
-            sleep 5
-            # 二次确认
-            WEBUI_RESULT2=$(get_webui_status)
-            WEBUI_STATUS2=$(echo "$WEBUI_RESULT2" | cut -d'|' -f1)
-            if [ "$WEBUI_STATUS2" != "HEALTHY" ]; then
-                log_warn "确认异常，正在重启 OpenWebUI..."
-                pkill -f "uvicorn" || true
-                pkill -f "start.sh" || true
-                sleep 2
-                PORT=8080 HOST=0.0.0.0 start_webui
-                log_info "重启命令已发送"
-            else
-                log_ok "OpenWebUI 已恢复正常"
-            fi
-            ;;
-        "NOT_RUNNING")
-            log_error "OpenWebUI: ✗ $WEBUI_STATUS ($WEBUI_DETAILS)"
-            log_warn "进程不存在，正在重启..."
-            PORT=8080 HOST=0.0.0.0 start_webui
-            ;;
-        *)
-            log_warn "OpenWebUI: ? $WEBUI_STATUS ($WEBUI_DETAILS)"
-            ;;
-    esac
-    
+
+    # ---- 冷却期内跳过 WebUI 检查 ----
+    NOW=$(date +%s)
+    ELAPSED=$((NOW - LAST_RESTART_TIME))
+    if [ "$LAST_RESTART_TIME" -gt 0 ] && [ "$ELAPSED" -lt "$RESTART_COOLDOWN" ]; then
+        REMAINING=$((RESTART_COOLDOWN - ELAPSED))
+        log_info "OpenWebUI: ⏳ 启动冷却中（还剩 ${REMAINING}秒），跳过检查"
+    else
+        # -------- OpenWebUI 状态检查 --------
+        WEBUI_RESULT=$(get_webui_status)
+        WEBUI_STATUS=$(echo "$WEBUI_RESULT" | cut -d'|' -f1)
+        WEBUI_DETAILS=$(echo "$WEBUI_RESULT" | cut -d'|' -f2)
+
+        case "$WEBUI_STATUS" in
+            "HEALTHY")
+                log_status "OpenWebUI: ✓ $WEBUI_STATUS ($WEBUI_DETAILS)"
+                # 恢复正常后重置计数器
+                if [ "$WEBUI_RESTART_COUNT" -gt 0 ]; then
+                    log_ok "OpenWebUI 已恢复，重置重启计数器"
+                    WEBUI_RESTART_COUNT=0
+                fi
+                ;;
+            "NOT_RESPONDING"|"HTTP_ERROR")
+                log_warn "OpenWebUI: ✗ $WEBUI_STATUS ($WEBUI_DETAILS)"
+                log_warn "等待 15 秒后二次确认..."
+                sleep 15
+                WEBUI_RESULT2=$(get_webui_status)
+                WEBUI_STATUS2=$(echo "$WEBUI_RESULT2" | cut -d'|' -f1)
+                if [ "$WEBUI_STATUS2" != "HEALTHY" ]; then
+                    log_warn "二次确认仍异常: $WEBUI_STATUS2"
+                    restart_webui
+                else
+                    log_ok "OpenWebUI 已自行恢复"
+                fi
+                ;;
+            "NOT_RUNNING")
+                log_error "OpenWebUI: ✗ $WEBUI_STATUS ($WEBUI_DETAILS)"
+                restart_webui
+                ;;
+            *)
+                log_warn "OpenWebUI: ? $WEBUI_STATUS ($WEBUI_DETAILS)"
+                ;;
+        esac
+    fi
+
     # -------- 隧道状态检查 --------
     if [ -n "$ARGO_AUTH" ]; then
         if pgrep -f "dd-dd" >/dev/null; then
@@ -273,10 +290,11 @@ while true; do
             log_status "Tunnel: ✓ RUNNING (PID=$TUNNEL_PID)"
         else
             log_warn "Tunnel: ✗ NOT_RUNNING - 正在重启..."
-            /usr/local/bin/dd-dd tunnel --no-autoupdate run --protocol http2 --token "$ARGO_AUTH" > /tmp/tunnel.log 2>&1 &
+            /usr/local/bin/dd-dd tunnel --no-autoupdate run \
+                --protocol http2 --token "$ARGO_AUTH" > /tmp/tunnel.log 2>&1 &
         fi
     fi
-    
+
     # -------- Nginx 状态检查 --------
     if pgrep -x "nginx" >/dev/null; then
         NGINX_PID=$(pgrep -x "nginx" | head -1)
@@ -285,9 +303,7 @@ while true; do
         log_warn "Nginx: ✗ NOT_RUNNING - 正在重启..."
         nginx
     fi
-    
+
     echo "=================================================="
-    
-    # 30 秒检查一次
     sleep 30
 done
