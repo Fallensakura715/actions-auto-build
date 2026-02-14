@@ -68,7 +68,7 @@ get_webui_status() {
     echo "$status|$details"
 }
 
-restart_webui() {
+start_webui() {
     local now
     now=$(date +%s)
 
@@ -268,14 +268,14 @@ while true; do
                 WEBUI_STATUS2=$(echo "$WEBUI_RESULT2" | cut -d'|' -f1)
                 if [ "$WEBUI_STATUS2" != "HEALTHY" ]; then
                     log_warn "二次确认仍异常: $WEBUI_STATUS2"
-                    restart_webui
+                    start_webui
                 else
                     log_ok "OpenWebUI 已自行恢复"
                 fi
                 ;;
             "NOT_RUNNING")
                 log_error "OpenWebUI: ✗ $WEBUI_STATUS ($WEBUI_DETAILS)"
-                restart_webui
+                start_webui
                 ;;
             *)
                 log_warn "OpenWebUI: ? $WEBUI_STATUS ($WEBUI_DETAILS)"
