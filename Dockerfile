@@ -40,10 +40,6 @@ RUN mkdir -p /etc/redis && \
     mkdir -p /var/lib/redis && \
     chown -R redis:redis /var/lib/redis
 
-# 创建 supervisor 配置
-RUN mkdir -p /etc/supervisor/conf.d
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
 # 设置权限
 RUN chmod +x /entrypoint.sh && \
     sed -i 's/\r$//' /entrypoint.sh
