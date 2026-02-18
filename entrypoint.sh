@@ -68,58 +68,6 @@ get_webui_status() {
     echo "$status|$details"
 }
 
-# Redis 状态检查函数
-get_redis_status() {
-    if pgrep -x "redis-server" >/dev/null 2>&1; then
-        if redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
-            pid=$(pgrep -x "redis-server" | head -1)
-            clients=$(redis-cli -h 127.0.0.1 -p 6379 INFO clients 2>/dev/null | grep connected_clients | cut -d: -f2 | tr -d '\r\n' || echo "?")
-            echo "HEALTHY|PID=$pid, Clients=$clients"
-        else
-            echo "NOT_RESPONDING|Process exists but not responding"
-        fi
-    else
-        echo "NOT_RUNNING|redis-server process not found"
-    fi
-}
-
-# 启动 Redis 的函数
-start_redis() {
-    log_info "正在启动 Redis..."
-    
-    # 确保目录存在
-    mkdir -p /var/lib/redis /var/log/redis
-    chown -R redis:redis /var/lib/redis /var/log/redis 2>/dev/null || true
-    
-    # 启动 Redis（后台运行）
-    /usr/bin/redis-server /etc/redis/redis.conf --daemonize yes 2>&1 | tee -a /tmp/redis.log
-    
-    # 等待 Redis 启动（最多 60 秒）
-    log_info "等待 Redis 就绪..."
-    for i in $(seq 1 60); do
-        if redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
-            log_ok "Redis 已就绪（耗时 ${i}s）"
-            # 测试读写
-            if redis-cli -h 127.0.0.1 -p 6379 SET startup_test "ok" >/dev/null 2>&1; then
-                test_val=$(redis-cli -h 127.0.0.1 -p 6379 GET startup_test 2>/dev/null)
-                if [ "$test_val" = "ok" ]; then
-                    log_ok "Redis 连接测试通过"
-                    redis-cli -h 127.0.0.1 -p 6379 DEL startup_test >/dev/null 2>&1
-                    return 0
-                fi
-            fi
-            log_warn "Redis ping 成功但读写测试失败"
-            return 1
-        fi
-        sleep 1
-    done
-    
-    log_error "Redis 启动超时（60秒）"
-    log_error "Redis 日志："
-    cat /tmp/redis.log 2>/dev/null || echo "无日志文件"
-    return 1
-}
-
 # 真正启动 WebUI 的函数
 launch_webui() {
     cd /app/backend
@@ -167,22 +115,6 @@ tail_logs() {
 }
 
 echo "===== Application Startup at $(date '+%Y-%m-%d %H:%M:%S') ====="
-
-# =========================
-# 步骤 0: 启动 Redis
-# =========================
-echo "=========================================="
-echo " 步骤 0: 启动 Redis"
-echo "=========================================="
-
-log_info "Redis 环境变量: REDIS_URL=$REDIS_URL"
-
-if start_redis; then
-    log_ok "Redis 服务已成功启动"
-else
-    log_error "Redis 启动失败！"
-    log_warn "将尝试继续启动其他服务（可能导致功能受限）"
-fi
 
 # =========================
 # 步骤 1: 启动 Nginx (健康检查)
@@ -315,30 +247,6 @@ while true; do
     CHECK_COUNT=$((CHECK_COUNT + 1))
     echo ""
     echo "========== 健康检查 #$CHECK_COUNT [$(date '+%Y-%m-%d %H:%M:%S')] =========="
-
-    # -------- Redis 状态检查 --------
-    REDIS_RESULT=$(get_redis_status)
-    REDIS_STATUS=$(echo "$REDIS_RESULT" | cut -d'|' -f1)
-    REDIS_DETAILS=$(echo "$REDIS_RESULT" | cut -d'|' -f2)
-    
-    case "$REDIS_STATUS" in
-        "HEALTHY")
-            log_status "Redis: ✓ $REDIS_STATUS ($REDIS_DETAILS)"
-            ;;
-        "NOT_RESPONDING")
-            log_warn "Redis: ✗ $REDIS_STATUS ($REDIS_DETAILS) - 正在重启..."
-            pkill -x redis-server 2>/dev/null || true
-            sleep 2
-            start_redis
-            ;;
-        "NOT_RUNNING")
-            log_warn "Redis: ✗ $REDIS_STATUS ($REDIS_DETAILS) - 正在重启..."
-            start_redis
-            ;;
-        *)
-            log_warn "Redis: ? $REDIS_STATUS ($REDIS_DETAILS)"
-            ;;
-    esac
 
     # ---- 冷却期内跳过 WebUI 检查 ----
     NOW=$(date +%s)
