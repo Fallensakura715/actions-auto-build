@@ -2,7 +2,7 @@ name: Build and Push Open-WebUI-Argo
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "open-webui-with-argo-tunnel" ]
   workflow_dispatch:
 
 env:
