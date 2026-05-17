@@ -32,52 +32,44 @@ wait_for_port() {
 }
 
 CHECK_COUNT=0
-WEBUI_RESTART_COUNT=0
+APP_RESTART_COUNT=0
 MAX_RESTART=5
 LAST_RESTART_TIME=0
 RESTART_COOLDOWN=120  # 重启后等待120秒再检查
 
-get_webui_status() {
+get_app_status() {
     status="UNKNOWN"
     details=""
-    if pgrep -f "uvicorn" >/dev/null 2>&1; then
-        pid=$(pgrep -f "uvicorn" | head -1)
+    if pgrep -f "node main.js" >/dev/null 2>&1; then
+        pid=$(pgrep -f "node main.js" | head -1)
         mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{printf "%.1f", $1/1024}')
         details="PID=$pid, MEM=${mem}MB"
-        http_result=$(curl -s --connect-timeout 5 --max-time 10 \
-                      -w "%{http_code}" http://127.0.0.1:8080/api/version 2>/dev/null || echo "000")
-        # POSIX兼容的方式提取最后3个字符
-        http_code=$(echo "$http_result" | tail -c 4 | head -c 3)
-        # POSIX兼容的方式提取body（去掉最后3个字符）
-        body=$(echo "$http_result" | sed 's/...$//')
-        if [ "$http_code" = "200" ]; then
-            status="HEALTHY"
-            version=$(echo "$body" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "N/A")
-            details="$details, HTTP=$http_code, Ver=$version"
-        elif [ "$http_code" = "000" ]; then
+        http_code=$(curl -s -o /dev/null --connect-timeout 5 --max-time 10 \
+                    -w "%{http_code}" http://127.0.0.1:8080/ 2>/dev/null || echo "000")
+        if [ "$http_code" = "000" ]; then
             status="NOT_RESPONDING"
             details="$details, HTTP=TIMEOUT"
         else
-            status="HTTP_ERROR"
+            status="HEALTHY"
             details="$details, HTTP=$http_code"
         fi
     else
         status="NOT_RUNNING"
-        details="uvicorn process not found"
+        details="node main.js process not found"
     fi
     echo "$status|$details"
 }
 
-# 真正启动 WebUI 的函数
-launch_webui() {
-    cd /app/backend
-    PORT=8080 HOST=0.0.0.0 ./start.sh > /tmp/webui.log 2>&1 &
-    WEBUI_PID=$!
-    log_info "OpenWebUI 已启动 (PID: $WEBUI_PID)"
+# 真正启动 AIStudioToAPI 的函数
+launch_app() {
+    cd /app
+    PORT=8080 HOST=0.0.0.0 node main.js > /tmp/aistudio.log 2>&1 &
+    APP_PID=$!
+    log_info "AIStudioToAPI 已启动 (PID: $APP_PID)"
 }
 
-# 重启 WebUI 的函数（带保护机制）
-start_webui() {
+# 重启 AIStudioToAPI 的函数（带保护机制）
+start_app() {
     now=$(date +%s)
 
     # ---- 防护1: 冷却期内不重启 ----
@@ -89,27 +81,27 @@ start_webui() {
     fi
 
     # ---- 防护2: 超过最大重启次数则放弃 ----
-    if [ "$WEBUI_RESTART_COUNT" -ge "$MAX_RESTART" ]; then
-        log_error "已连续重启 ${WEBUI_RESTART_COUNT} 次仍失败，停止自动重启"
-        log_error "请手动排查日志: /tmp/webui.log"
+    if [ "$APP_RESTART_COUNT" -ge "$MAX_RESTART" ]; then
+        log_error "已连续重启 ${APP_RESTART_COUNT} 次仍失败，停止自动重启"
+        log_error "请手动排查日志: /tmp/aistudio.log"
         return 1
     fi
 
     # ---- 执行重启 ----
-    WEBUI_RESTART_COUNT=$((WEBUI_RESTART_COUNT + 1))
+    APP_RESTART_COUNT=$((APP_RESTART_COUNT + 1))
     LAST_RESTART_TIME=$now
-    log_warn "正在重启 OpenWebUI（第 ${WEBUI_RESTART_COUNT}/${MAX_RESTART} 次）..."
+    log_warn "正在重启 AIStudioToAPI（第 ${APP_RESTART_COUNT}/${MAX_RESTART} 次）..."
 
-    pkill -f "uvicorn" 2>/dev/null || true
+    pkill -f "node main.js" 2>/dev/null || true
     sleep 3
-    launch_webui
+    launch_app
     log_info "重启命令已发送，等待 ${RESTART_COOLDOWN} 秒冷却期"
 }
 
 # 实时读取日志文件的后台进程（确保日志能显示在 HF 控制台）
 tail_logs() {
-    touch /tmp/webui.log
-    tail -f /tmp/webui.log &
+    touch /tmp/aistudio.log
+    tail -f /tmp/aistudio.log &
     TAIL_PID=$!
     log_info "日志监控进程 PID: $TAIL_PID"
 }
@@ -135,55 +127,46 @@ else
 fi
 
 # =========================
-# 步骤 2: 启动 Open WebUI
+# 步骤 2: 启动 AIStudioToAPI
 # =========================
 echo "=========================================="
-echo " 步骤 2: 启动 Open WebUI"
+echo " 步骤 2: 启动 AIStudioToAPI"
 echo "=========================================="
 
 # 检查目录是否存在
-if [ ! -d "/app/backend" ]; then
-    log_error "/app/backend 目录不存在"
+if [ ! -d "/app" ]; then
+    log_error "/app 目录不存在"
     exit 1
 fi
 
-cd /app/backend
+cd /app
 
-# 检查启动脚本是否存在
-if [ ! -f "./start.sh" ]; then
-    log_error "start.sh 不存在"
+# 检查启动文件是否存在
+if [ ! -f "./main.js" ]; then
+    log_error "main.js 不存在"
     exit 1
 fi
 
 # 启动日志监控
 tail_logs
 
-# 首次启动 WebUI
-launch_webui
+# 首次启动 AIStudioToAPI
+launch_app
 
 # 等待服务启动
-log_info "等待 Open WebUI 启动..."
+log_info "等待 AIStudioToAPI 启动..."
 sleep 10
 
 # 健康检查
 if wait_for_port 8080 60; then
-    log_ok "Open WebUI 已成功启动并监听 8080 端口"
-    # 额外的 HTTP 健康检查
-    for i in $(seq 1 10); do
-        if curl -sf http://localhost:8080/api/version > /dev/null 2>&1; then
-            log_ok "Open WebUI API 健康检查通过！"
-            break
-        fi
-        log_info "等待 API 响应... ($i/10)"
-        sleep 2
-    done
+    log_ok "AIStudioToAPI 已成功启动并监听 8080 端口"
 else
-    log_error "Open WebUI 启动超时，最后 30 行日志："
-    tail -n 30 /tmp/webui.log
+    log_error "AIStudioToAPI 启动超时，最后 30 行日志："
+    tail -n 30 /tmp/aistudio.log
     log_info "尽管启动检测失败，监控进程仍在运行并会自动重试"
 fi
 
-log_ok "Open WebUI 监控已启动，进程会在崩溃后自动重启"
+log_ok "AIStudioToAPI 监控已启动，进程会在崩溃后自动重启"
 
 # =========================
 # 步骤 3: 生成 SSL 证书
@@ -238,7 +221,7 @@ echo "=========================================="
 log_ok "Redis: http://127.0.0.1:6379"
 [ -n "$ARGO_DOMAIN" ] && log_ok "访问地址: https://$ARGO_DOMAIN"
 log_info "HTTP: http://localhost:7860"
-log_info "WebUI: http://localhost:8080"
+log_info "AIStudioToAPI: http://localhost:8080"
 
 # =========================
 # 健康检查循环
@@ -248,46 +231,46 @@ while true; do
     echo ""
     echo "========== 健康检查 #$CHECK_COUNT [$(date '+%Y-%m-%d %H:%M:%S')] =========="
 
-    # ---- 冷却期内跳过 WebUI 检查 ----
+    # ---- 冷却期内跳过 AIStudioToAPI 检查 ----
     NOW=$(date +%s)
     ELAPSED=$((NOW - LAST_RESTART_TIME))
     if [ "$LAST_RESTART_TIME" -gt 0 ] && [ "$ELAPSED" -lt "$RESTART_COOLDOWN" ]; then
         REMAINING=$((RESTART_COOLDOWN - ELAPSED))
-        log_info "OpenWebUI: ⏳ 启动冷却中（还剩 ${REMAINING}秒），跳过检查"
+        log_info "AIStudioToAPI: ⏳ 启动冷却中（还剩 ${REMAINING}秒），跳过检查"
     else
-        # -------- OpenWebUI 状态检查 --------
-        WEBUI_RESULT=$(get_webui_status)
-        WEBUI_STATUS=$(echo "$WEBUI_RESULT" | cut -d'|' -f1)
-        WEBUI_DETAILS=$(echo "$WEBUI_RESULT" | cut -d'|' -f2)
+        # -------- AIStudioToAPI 状态检查 --------
+        APP_RESULT=$(get_app_status)
+        APP_STATUS=$(echo "$APP_RESULT" | cut -d'|' -f1)
+        APP_DETAILS=$(echo "$APP_RESULT" | cut -d'|' -f2)
 
-        case "$WEBUI_STATUS" in
+        case "$APP_STATUS" in
             "HEALTHY")
-                log_status "OpenWebUI: ✓ $WEBUI_STATUS ($WEBUI_DETAILS)"
+                log_status "AIStudioToAPI: ✓ $APP_STATUS ($APP_DETAILS)"
                 # 恢复正常后重置计数器
-                if [ "$WEBUI_RESTART_COUNT" -gt 0 ]; then
-                    log_ok "OpenWebUI 已恢复，重置重启计数器"
-                    WEBUI_RESTART_COUNT=0
+                if [ "$APP_RESTART_COUNT" -gt 0 ]; then
+                    log_ok "AIStudioToAPI 已恢复，重置重启计数器"
+                    APP_RESTART_COUNT=0
                 fi
                 ;;
             "NOT_RESPONDING"|"HTTP_ERROR")
-                log_warn "OpenWebUI: ✗ $WEBUI_STATUS ($WEBUI_DETAILS)"
+                log_warn "AIStudioToAPI: ✗ $APP_STATUS ($APP_DETAILS)"
                 log_warn "等待 15 秒后二次确认..."
                 sleep 15
-                WEBUI_RESULT2=$(get_webui_status)
-                WEBUI_STATUS2=$(echo "$WEBUI_RESULT2" | cut -d'|' -f1)
-                if [ "$WEBUI_STATUS2" != "HEALTHY" ]; then
-                    log_warn "二次确认仍异常: $WEBUI_STATUS2"
-                    start_webui
+                APP_RESULT2=$(get_app_status)
+                APP_STATUS2=$(echo "$APP_RESULT2" | cut -d'|' -f1)
+                if [ "$APP_STATUS2" != "HEALTHY" ]; then
+                    log_warn "二次确认仍异常: $APP_STATUS2"
+                    start_app
                 else
-                    log_ok "OpenWebUI 已自行恢复"
+                    log_ok "AIStudioToAPI 已自行恢复"
                 fi
                 ;;
             "NOT_RUNNING")
-                log_error "OpenWebUI: ✗ $WEBUI_STATUS ($WEBUI_DETAILS)"
-                start_webui
+                log_error "AIStudioToAPI: ✗ $APP_STATUS ($APP_DETAILS)"
+                start_app
                 ;;
             *)
-                log_warn "OpenWebUI: ? $WEBUI_STATUS ($WEBUI_DETAILS)"
+                log_warn "AIStudioToAPI: ? $APP_STATUS ($APP_DETAILS)"
                 ;;
         esac
     fi

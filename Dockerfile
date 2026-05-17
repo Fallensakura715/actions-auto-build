@@ -1,4 +1,4 @@
-FROM ghcr.io/open-webui/open-webui:main
+FROM ghcr.io/ibuhub/aistudio-to-api:latest
 
 USER root
 
@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y \
 
 # 复制 cloudflared（伪装名称）
 COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/dd-dd
+
+# 修改 Camoufox 进程名
+RUN mv /app/camoufox-linux/camoufox /app/cl-cl/aistudio-browser
 
 # Nginx 配置
 COPY main.conf /etc/nginx/conf.d/main.conf
@@ -33,6 +36,7 @@ EXPOSE 8080
 ENV DD_DM="" \
     DD_DD="" \
     PORT=8080 \
-    HOST=0.0.0.0
+    HOST=0.0.0.0 \
+    CAMOUFOX_EXECUTABLE_PATH=/app/cl-cl/aistudio-browser
 
 CMD ["/entrypoint.sh"]
