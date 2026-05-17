@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_IMAGE: fallensakura715/owuuwo1
+  DOCKER_IMAGE: fallensakura715/alwnfslnls
 
 jobs:
   build:
