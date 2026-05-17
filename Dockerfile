@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y \
 COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/dd-dd
 
 # 修改 Camoufox 进程名
-RUN mv /app/camoufox-linux/camoufox /app/cl-cl/aistudio-browser
+RUN mv /app/camoufox-linux /app/cl-cl && \
+    mv /app/cl-cl/camoufox /app/cl-cl/aistudio-browser
 
 # Nginx 配置
 COPY main.conf /etc/nginx/conf.d/main.conf
