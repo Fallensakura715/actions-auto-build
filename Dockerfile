@@ -13,9 +13,8 @@ RUN apt-get update && apt-get install -y \
 # 复制 cloudflared（伪装名称）
 COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/dd-dd
 
-# 修改 Camoufox 进程名
-RUN mv /app/camoufox-linux /app/cl-cl && \
-    mv /app/cl-cl/camoufox /app/cl-cl/aistudio-api-browser
+# 修改 Camoufox 启动进程名
+RUN ln -sf "$(command -v python3)" /usr/local/bin/aistudio-api-browser
 
 # Nginx 配置
 COPY main.conf /etc/nginx/conf.d/main.conf
@@ -38,6 +37,6 @@ ENV DD_DM="" \
     DD_DD="" \
     PORT=8080 \
     HOST=0.0.0.0 \
-    CAMOUFOX_EXECUTABLE_PATH=/app/cl-cl/aistudio-api-browser
+    AISTUDIO_BROWSER_PYTHON=/usr/local/bin/aistudio-api-browser
 
 CMD ["/entrypoint.sh"]

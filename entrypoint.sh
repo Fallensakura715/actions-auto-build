@@ -40,8 +40,8 @@ RESTART_COOLDOWN=120  # 重启后等待120秒再检查
 get_app_status() {
     status="UNKNOWN"
     details=""
-    if pgrep -f "node main.js" >/dev/null 2>&1; then
-        pid=$(pgrep -f "node main.js" | head -1)
+    if pgrep -f "main.py server" >/dev/null 2>&1; then
+        pid=$(pgrep -f "main.py server" | head -1)
         mem=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{printf "%.1f", $1/1024}')
         details="PID=$pid, MEM=${mem}MB"
         http_code=$(curl -s -o /dev/null --connect-timeout 5 --max-time 10 \
@@ -55,7 +55,7 @@ get_app_status() {
         fi
     else
         status="NOT_RUNNING"
-        details="node main.js process not found"
+        details="main.py server process not found"
     fi
     echo "$status|$details"
 }
@@ -63,7 +63,7 @@ get_app_status() {
 # 真正启动 AIStudioToAPI 的函数
 launch_app() {
     cd /app
-    PORT=8080 HOST=0.0.0.0 node main.js > /tmp/aistudio.log 2>&1 &
+    python3 main.py server --port 8080 --browser-port "${AISTUDIO_BROWSER_PORT:-${AISTUDIO_CAMOUFOX_PORT:-9222}}" > /tmp/aistudio.log 2>&1 &
     APP_PID=$!
     log_info "AIStudioToAPI 已启动 (PID: $APP_PID)"
 }
@@ -92,7 +92,7 @@ start_app() {
     LAST_RESTART_TIME=$now
     log_warn "正在重启 AIStudioToAPI（第 ${APP_RESTART_COUNT}/${MAX_RESTART} 次）..."
 
-    pkill -f "node main.js" 2>/dev/null || true
+    pkill -f "main.py server" 2>/dev/null || true
     sleep 3
     launch_app
     log_info "重启命令已发送，等待 ${RESTART_COOLDOWN} 秒冷却期"
@@ -142,8 +142,8 @@ fi
 cd /app
 
 # 检查启动文件是否存在
-if [ ! -f "./main.js" ]; then
-    log_error "main.js 不存在"
+if [ ! -f "./main.py" ]; then
+    log_error "main.py 不存在"
     exit 1
 fi
 
