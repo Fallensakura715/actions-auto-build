@@ -1,4 +1,4 @@
-FROM ghcr.io/ibuhub/aistudio-to-api:latest
+FROM ghcr.io/chrysoljq/aistudio-api:latest
 
 USER root
 
@@ -15,7 +15,7 @@ COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/
 
 # 修改 Camoufox 进程名
 RUN mv /app/camoufox-linux /app/cl-cl && \
-    mv /app/cl-cl/camoufox /app/cl-cl/aistudio-browser
+    mv /app/cl-cl/camoufox /app/cl-cl/aistudio-api-browser
 
 # Nginx 配置
 COPY main.conf /etc/nginx/conf.d/main.conf
@@ -38,6 +38,6 @@ ENV DD_DM="" \
     DD_DD="" \
     PORT=8080 \
     HOST=0.0.0.0 \
-    CAMOUFOX_EXECUTABLE_PATH=/app/cl-cl/aistudio-browser
+    CAMOUFOX_EXECUTABLE_PATH=/app/cl-cl/aistudio-api-browser
 
 CMD ["/entrypoint.sh"]
