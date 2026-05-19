@@ -13,7 +13,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # setproctitle：修改 Python 进程的 /proc/PID/cmdline
-RUN pip3 install --no-cache-dir setproctitle
+# camoufox[geoip]：安装包本体（含 GeoIP 数据库支持）
+# playwright install-deps firefox：安装 Firefox 运行时系统依赖（apt 层）
+# playwright install firefox：下载 Playwright 管理的 Firefox 二进制
+# camoufox fetch：下载 Camoufox 专用浏览器二进制（镜像会因此增大）
+RUN pip3 install --no-cache-dir setproctitle "camoufox[geoip]" && \
+    python3 -m playwright install-deps firefox && \
+    python3 -m playwright install firefox && \
+    python3 -m camoufox fetch
 
 # Cloudflare Tunnel 辅助程序（重命名避免特征）
 COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/dd-dd
