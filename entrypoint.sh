@@ -91,15 +91,21 @@ get_app_status() {
 launch_app() {
     cd /app
 
-    exec -a "$FAKE_PROC_NAME" \
-        python3 /usr/local/bin/proc_shim.py \
-            server \
-            --port 8080 \
-            --browser-port "${AISTUDIO_BROWSER_PORT:-${AISTUDIO_CAMOUFOX_PORT:-9222}}" \
-        > /tmp/aistudio.log 2>&1 &
+    # 用子 shell 把真实 PID（python 进程）写入文件，
+    # 再 exec -a 替换子 shell 自身，保证伪装名生效。
+    # 2>&1 | tee 让日志同时出现在 Docker stdout（docker logs 可见）
+    # 和 /tmp/aistudio.log（崩溃后 tail -n 30 诊断用）。
+    ( echo $$ > "$APP_PID_FILE"
+      exec -a "$FAKE_PROC_NAME" \
+          python3 /usr/local/bin/proc_shim.py \
+              server \
+              --port 8080 \
+              --browser-port "${AISTUDIO_BROWSER_PORT:-${AISTUDIO_CAMOUFOX_PORT:-9222}}"
+    ) 2>&1 | tee /tmp/aistudio.log &
 
-    APP_PID=$!
-    echo "$APP_PID" > "$APP_PID_FILE"
+    # 等 PID 文件写入后读取
+    sleep 0.3
+    APP_PID=$(cat "$APP_PID_FILE" 2>/dev/null || true)
     log_info "AIStudioToAPI 已启动 (PID=$APP_PID, 伪装名=$FAKE_PROC_NAME)"
 }
 
@@ -143,13 +149,11 @@ start_app() {
 }
 
 # ---------------------------------------------------------
-# tail_logs — 后台实时输出日志到 HF/Docker 控制台
+# tail_logs — 已废弃（保留空函数避免调用报错）
+# 日志现在直接打到 Docker stdout，无需 tail -f
 # ---------------------------------------------------------
 tail_logs() {
     touch /tmp/aistudio.log
-    tail -f /tmp/aistudio.log &
-    TAIL_PID=$!
-    log_info "日志监控进程 PID: $TAIL_PID"
 }
 
 # =========================
