@@ -13,8 +13,7 @@ on:
 env:
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/dailysync-rev
   UPSTREAM_REPO: gooin/dailysync-rev
-  UPSTREAM_BRANCH: garmin-data-dailysync-rev
-
+  UPSTREAM_BRANCH: main
 jobs:
   docker:
     runs-on: ubuntu-latest
