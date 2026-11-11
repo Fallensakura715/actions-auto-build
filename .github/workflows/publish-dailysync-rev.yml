@@ -12,8 +12,8 @@ on:
 
 env:
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/dailysync-rev
-  UPSTREAM_REPO: gooin/dailysync-rev
-  UPSTREAM_BRANCH: main
+  UPSTREAM_REPO: fallensakura715/dailysync-rev
+  UPSTREAM_BRANCH: test/wreq-js
 jobs:
   docker:
     runs-on: ubuntu-latest
