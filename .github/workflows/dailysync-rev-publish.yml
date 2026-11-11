@@ -1,0 +1,80 @@
+name: Docker Build & Push (follow upstream)
+
+on:
+  schedule:
+    - cron: "0 20 1 * *"   # UTC 20:00 = 北京时间次日 04:00,每天检查一次
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "忽略检查,强制重新构建"
+        type: boolean
+        default: false
+
+env:
+  IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/dailysync-rev
+  UPSTREAM_REPO: gooin/dailysync-rev
+  UPSTREAM_BRANCH: garmin-data-dailysync-rev
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Get upstream commit
+        id: up
+        run: |
+          SHA=$(git ls-remote "https://github.com/${UPSTREAM_REPO}.git" "refs/heads/${UPSTREAM_BRANCH}" | cut -f1)
+          if [ -z "$SHA" ]; then
+            echo "Upstream branch ${UPSTREAM_BRANCH} not found"; exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Check if this upstream commit is already built
+        id: check
+        run: |
+          if docker buildx imagetools inspect "${IMAGE}:up-${{ steps.up.outputs.short }}" > /dev/null 2>&1; then
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "built=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip notice
+        if: steps.check.outputs.built == 'true' && !inputs.force
+        run: echo "Upstream ${{ steps.up.outputs.short }} already built, nothing to do."
+
+      - name: Checkout upstream
+        if: steps.check.outputs.built != 'true' || inputs.force
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ steps.up.outputs.sha }}
+
+      - name: Set up QEMU
+        if: steps.check.outputs.built != 'true' || inputs.force
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build and push
+        if: steps.check.outputs.built != 'true' || inputs.force
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:up-${{ steps.up.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
